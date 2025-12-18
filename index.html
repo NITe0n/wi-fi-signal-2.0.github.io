@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFi Mapper Studio</title>
-    <!-- Подключаем библиотеки -->
+    <!-- Загрузка библиотек -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -14,78 +14,99 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
     
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
-        body { 
+        body, html { 
             background-color: #131314; 
             color: #e3e3e3;
             font-family: 'Inter', sans-serif;
             margin: 0;
+            padding: 0;
+            height: 100%;
             overflow: hidden;
         }
 
-        /* Аккуратная сетка на заднем фоне */
+        /* Настройка сетки (Blueprint) */
         .blueprint-grid {
             background-color: #131314;
             background-image: 
-                linear-gradient(#242426 1px, transparent 1px),
-                linear-gradient(90deg, #242426 1px, transparent 1px);
-            background-size: 40px 40px;
+                linear-gradient(#1e1f20 1px, transparent 1px),
+                linear-gradient(90deg, #1e1f20 1px, transparent 1px);
+            background-size: 30px 30px;
             background-position: center center;
             position: relative;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
         }
 
-        /* Мягкое свечение в центре, не мешающее работе */
         .blueprint-grid::after {
             content: "";
             position: absolute;
             inset: 0;
-            background: radial-gradient(circle at center, rgba(26, 115, 232, 0.08), transparent 75%);
+            background: radial-gradient(circle at center, rgba(26, 115, 232, 0.05), transparent 80%);
             pointer-events: none;
         }
 
+        /* Стиль точек на карте */
+        .map-pin {
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Снег */
         #snow-canvas {
             position: fixed;
             top: 0; left: 0;
             pointer-events: none;
-            z-index: 100;
+            z-index: 999;
         }
 
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
-
+        /* Кастомный скроллбар */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
+        
+        /* Убираем стрелочки у input number */
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root" style="height: 100vh;"></div>
 
     <script type="text/babel">
-        const { useState, useCallback, useRef, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // Безопасный компонент иконок
+        // --- Компонент иконки (Безопасный) ---
         const Icon = ({ name, size = 18, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
             return <i data-lucide={name} style={{width: size, height: size}} className={`inline-block ${className}`}></i>;
         };
 
-        const SnowEffect = ({ active }) => {
+        // --- Эффект снега ---
+        const Snow = ({ active }) => {
             const canvasRef = useRef(null);
             useEffect(() => {
                 if (!active) return;
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 let animationId;
-                const particles = Array.from({ length: 120 }, () => ({
+                const particles = Array.from({ length: 100 }, () => ({
                     x: Math.random() * window.innerWidth,
                     y: Math.random() * window.innerHeight,
-                    r: Math.random() * 2 + 1,
-                    v: Math.random() * 0.8 + 0.4
+                    r: Math.random() * 3 + 1,
+                    v: Math.random() * 1 + 0.5
                 }));
-                const draw = () => {
+                const render = () => {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
                     particles.forEach(p => {
                         ctx.beginPath();
                         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
@@ -93,295 +114,76 @@
                         p.y += p.v;
                         if (p.y > canvas.height) p.y = -5;
                     });
-                    animationId = requestAnimationFrame(draw);
+                    animationId = requestAnimationFrame(render);
                 };
-                const handleResize = () => {
-                    canvas.width = window.innerWidth;
-                    canvas.height = window.innerHeight;
-                };
-                window.addEventListener('resize', handleResize);
-                handleResize();
-                draw();
-                return () => {
-                    cancelAnimationFrame(animationId);
-                    window.removeEventListener('resize', handleResize);
-                };
-            }, [active]);
-            return active ? <canvas ref={canvasRef} id="snow-canvas" /> : null;
-        };
-
-        const App = () => {
-            const [points, setPoints] = useState([]);
-            const [selectedPointId, setSelectedPointId] = useState(null);
-            const [image, setImage] = useState(null);
-            const [zoom, setZoom] = useState(1);
-            const [isSnowing, setIsSnowing] = useState(false);
-            const mapRef = useRef(null);
-
-            // Инициализация иконок Lucide после обновлений
-            useEffect(() => {
-                if (window.lucide) {
-                    window.lucide.createIcons();
-                }
-            }, [image, points, isSnowing]);
-
-            const handleFileUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    setImage(ev.target.result);
-                    setPoints([]);
-                    setZoom(1);
-                };
-                reader.readAsDataURL(file);
-            };
-
-            const addPoint = (e) => {
-                if (!image || e.target.closest('.map-pin')) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 100;
-                const y = ((e.clientY - rect.top) / rect.height) * 100;
-                
-                const newId = points.length > 0 ? Math.max(...points.map(p => p.id)) + 1 : 1;
-                const newPoint = { id: newId, x, y, dbm: '' };
-                setPoints([...points, newPoint]);
-                setSelectedPointId(newId);
-            };
-
-            const handleExport = async () => {
-                if (points.length === 0) return alert("Сначала добавьте точки замера!");
-                
-                // 1. Сохранение Excel
-                const data = points.map(p => ({ "Точка №": p.id, "Сигнал (dBm)": p.dbm || "0" }));
-                const ws = XLSX.utils.json_to_sheet(data);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "WiFi Report");
-                XLSX.writeFile(wb, "wifi_data.xlsx");
-
-                // 2. Сохранение Картинки
-                if (mapRef.current) {
-                    try {
-                        const dataUrl = await htmlToImage.toPng(mapRef.current, { backgroundColor: '#ffffff' });
-                        const link = document.createElement('a');
-                        link.download = 'wifi_plan_export.png';
-                        link.href = dataUrl;
-                        link.click();
-                    } catch (err) {
-                        console.error('Ошибка экспорта изображения:', err);
-                    }
-                }
-            };
-
-            return (
-                <div className="flex flex-col h-screen w-screen bg-[#131314]">
-                    <SnowEffect active={isSnowing} />
-                    
-                    {/* Header */}
-                    <header className="h-14 bg-[#1e1f20] border-b border-[#3c4043] flex items-center justify-between px-6 shrink-0 z-50 shadow-md">
-                        <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-[#1a73e8] rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                                <Icon name="wifi" size={18} />
-                            </div>
-                            <span className="text-sm font-semibold tracking-tight text-[#e3e3e3]">WIFI MAPPER STUDIO</span>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            <button 
-                                onClick={() => setIsSnowing(!isSnowing)}
-                                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${isSnowing ? 'bg-white text-black font-bold' : 'bg-[#3c4043] text-[#c4c7c5] hover:bg-[#4f5255]'}`}
-                            >
-                                <Icon name="snowflake" size={14} />
-                                <span>Let it snow</span>
-                            </button>
-                            {image && (
-                                <button onClick={handleExport} className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-5 py-1.5 rounded-full text-xs font-medium shadow-md transition-all active:scale-95">
-                                    Экспорт
-                                </button>
-                            )}
-                        </div>
-                    </header>
-
-                    <main className="flex-1 flex overflow-hidden">
-                        {/* Sidebar */}
-                        <aside className="w-72 bg-[#1e1f20] border-r border-[#3c4043] flex flex-col shrink-0 z-40">
-                            <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
-                                <span className="text-[10px] font-bold text-[#9aa0a6] uppercase tracking-widest">Измерения ({points.length})</span>
-                                {image && (
-                                    <button onClick={() => { if(confirm('Удалить все точки?')) setPoints([]) }} className="text-[#5f6368] hover:text-red-400 transition-colors">
-                                        <Icon name="trash-2" size={16} />
-                                    </button>
-                                )}
-                            </div>
-                            
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                                {!image ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-center opacity-20 py-10">
-                                        <Icon name="layout" size={48} className="mb-4" />
-                                        <p className="text-xs">Загрузите план,<br/>чтобы начать работу</p>
-                                    </div>
-                                ) : (
-                                    points.slice().reverse().map(p => (
-                                        <div 
-                                            key={p.id}
-                                            onClick={() => setSelectedPointId(p.id)}
-                                            className={`p-3 rounded-xl transition-all border cursor-pointer ${selectedPointId === p.id ? 'bg-[#2d2f31] border-[#1a73e8] shadow-lg' : 'bg-[#1e1f20] border-transparent hover:border-[#3c4043]'}`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${selectedPointId === p.id ? 'bg-[#1a73e8] text-white' : 'bg-[#3c4043] text-[#9aa0a6]'}`}>
-                                                    {p.id}
-                                                </div>
-                                                <div className="flex-1 relative">
-                                                    <input 
-                                                        type="number"
-                                                        value={p.dbm}
-                                                        placeholder="0"
-                                                        className="w-full bg-transparent border-none outline-none text-[#e3e3e3] font-mono text-sm placeholder:text-[#444746]"
-                                                        onChange={(e) => setPoints(points.map(pt => pt.id === p.id ? {...pt, dbm: e.target.value} : pt))}
-                                                    />
-                                                    <span className="absolute right-0 top-0.5 text-[9px] text-[#5f6368] font-bold uppercase">dBm</span>
-                                                </div>
-                                                <button onClick={(e) => { e.stopPropagation(); setPoints(points.filter(pt => pt.id !== p.id)); }} className="text-[#5f6368] hover:text-red-400">
-                                                    <Icon name="x" size={14} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-
-                            {!image && (
-                                <div className="p-4 bg-[#131314]">
-                                    <label className="block w-full bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-center py-3.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-lg active:scale-95 uppercase tracking-wide">
-                                        Загрузить план
-                                        <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
-                                    </label>
-                                </div>
-                            )}
-                        </aside>
-
-                        {/* Map Area */}
-                        <section className="flex-1 relative blueprint-grid flex items-center justify-center overflow-auto custom-scrollbar p-12">
-                            {image ? (
-                                <>
-                                    {/* Zoom Control Panel */}
-                                    <div className="fixed bottom-8 left-[320px] z-50 flex items-center bg-[#1e1f20]/90 backdrop-blur-md border border-[#3c4043] p-1.5 rounded-2xl shadow-2xl">
-                                        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5] transition-colors"><Icon name="minus" size={18}/></button>
-                                        <div className="w-px h-4 bg-[#3c4043] mx-1"></div>
-                                        <button onClick={() => setZoom(1)} className="px-3 text-[10px] font-bold text-[#9aa0a6] hover:text-white uppercase tracking-tighter transition-colors">100%</button>
-                                        <div className="w-px h-4 bg-[#3c4043] mx-1"></div>
-                                        <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5] transition-colors"><Icon name="plus" size={18}/></button>
-                                    </div>
-
-                                    {/* The Map */}
-                                    <div 
-                                        ref={mapRef}
-                                        onClick={addPoint}
-                                        className="relative shadow-[0_0_60px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out origin-center bg-white cursor-crosshair"
-                                        style={{ transform: `scale(${zoom})` }}
-                                    >
-                                        <img src={image} className="block max-w-none h-auto select-none pointer-events-none" style={{ maxHeight: '80vh' }} draggable={false} />
-                                        {points.map(p => (
-                                            <div 
-                                                key={p.id}
-                                                className={`map-pin absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto ${selectedPointId === p.id ? 'z-30' : 'z-20'}`}
-                                                style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                                            >
-                                                <div className={`w-8 h-8 rounded-full border-2 border-white shadow-xl flex items-center justify-center text-[10px] font-bold text-white transition-all ${selectedPointId === p.id ? 'bg-[#1a73e8] scale-125' : 'bg-red-500 hover:scale-110'}`}>
-                                                    {p.id}
-                                                </div>
-                                                {p.dbm && (
-                                                    <div className="mt-1 bg-[#1e1f20] text-white text-[9px] px-2 py-0.5 rounded border border-[#3c4043] font-bold shadow-lg whitespace-nowrap">
-                                                        {p.dbm} dBm
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="text-[#3c4043] flex flex-col items-center select-none">
-                                    <Icon name="layers" size={100} className="opacity-5 mb-6" />
-                                    <h2 className="text-2xl font-light tracking-[0.2em] opacity-10 uppercase">Studio Canvas</h2>
-                                </div>
-                            )}
-                        </section>
-                    </main>
-                </div>
-            );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>draw();
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                render();
                 return () => cancelAnimationFrame(animationId);
             }, [active]);
             return active ? <canvas ref={canvasRef} id="snow-canvas" /> : null;
         };
 
+        // --- Главное приложение ---
         const App = () => {
-            const [points, setPoints] = useState([]);
-            const [selectedPointId, setSelectedPointId] = useState(null);
             const [image, setImage] = useState(null);
-            const [zoom, setZoom] = useState(1);
+            const [points, setPoints] = useState([]);
+            const [selectedId, setSelectedId] = useState(null);
             const [isSnowing, setIsSnowing] = useState(false);
+            const [zoom, setZoom] = useState(1);
             const mapRef = useRef(null);
 
-            const handleFileUpload = (e) => {
+            const onFileChange = (e) => {
                 const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    setImage(event.target.result);
-                    setPoints([]);
-                    setZoom(1);
-                };
-                reader.readAsDataURL(file);
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (f) => {
+                        setImage(f.target.result);
+                        setPoints([]);
+                        setZoom(1);
+                    };
+                    reader.readAsDataURL(file);
+                }
             };
 
             const addPoint = (e) => {
-                if (e.target.closest('.map-pin')) return;
+                if (!image || e.target.closest('.map-pin-unit')) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
                 const y = ((e.clientY - rect.top) / rect.height) * 100;
-                const newId = points.length > 0 ? Math.max(...points.map(p => p.id)) + 1 : 1;
-                const newPoint = { id: newId, x, y, dbm: '' };
-                setPoints([...points, newPoint]);
-                setSelectedPointId(newId);
+                const nextId = points.length > 0 ? Math.max(...points.map(p => p.id)) + 1 : 1;
+                setPoints([...points, { id: nextId, x, y, dbm: '' }]);
+                setSelectedId(nextId);
             };
 
-            const exportData = async () => {
-                if (points.length === 0) return alert("Добавьте точки!");
-                
-                // 1. Excel
+            const doExport = async () => {
+                if (points.length === 0) return alert("Добавьте точки");
+                // Excel
                 const ws = XLSX.utils.json_to_sheet(points.map(p => ({ "ID": p.id, "Сигнал (dBm)": p.dbm || "0" })));
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "WiFi");
-                XLSX.writeFile(wb, "wifi_report.xlsx");
-
-                // 2. PNG
+                XLSX.utils.book_append_sheet(wb, ws, "WiFi Report");
+                XLSX.writeFile(wb, "wifi_data.xlsx");
+                // PNG
                 if (mapRef.current) {
-                    const dataUrl = await htmlToImage.toPng(mapRef.current);
+                    const blob = await htmlToImage.toPng(mapRef.current);
                     const link = document.createElement('a');
                     link.download = 'wifi_map.png';
-                    link.href = dataUrl;
+                    link.href = blob;
                     link.click();
                 }
             };
 
             return (
-                <div className="flex flex-col h-screen w-screen overflow-hidden">
-                    <SnowEffect active={isSnowing} />
+                <div className="flex flex-col h-full bg-[#131314]">
+                    <Snow active={isSnowing} />
                     
-                    {/* Top Bar */}
-                    <header className="h-14 bg-[#1e1f20] border-b border-[#3c4043] flex items-center justify-between px-6 z-50">
+                    {/* Header */}
+                    <header className="h-14 bg-[#1e1f20] border-b border-[#3c4043] flex items-center justify-between px-6 shrink-0 z-50">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-[#1a73e8] rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
-                                <Icon name="wifi" size={18} className="text-white" />
+                            <div className="w-8 h-8 bg-[#1a73e8] rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                <Icon name="zap" size={18} className="text-white" />
                             </div>
-                            <h1 className="text-sm font-semibold tracking-wide text-[#e3e3e3]">WIFI MAPPER STUDIO</h1>
+                            <span className="text-sm font-semibold text-[#e3e3e3] tracking-wide">WiFi Mapper Studio</span>
                         </div>
 
                         <div className="flex items-center gap-3">
@@ -393,7 +195,7 @@
                                 <span>Let it snow</span>
                             </button>
                             {image && (
-                                <button onClick={exportData} className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-5 py-1.5 rounded-full text-xs font-medium shadow-md transition-all">
+                                <button onClick={doExport} className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-5 py-1.5 rounded-full text-xs font-medium shadow-md">
                                     Экспорт
                                 </button>
                             )}
@@ -401,31 +203,30 @@
                     </header>
 
                     <main className="flex-1 flex overflow-hidden">
-                        {/* Sidebar */}
-                        <aside className="w-72 bg-[#1e1f20] border-r border-[#3c4043] flex flex-col shrink-0 z-40">
+                        {/* Сайдбар */}
+                        <aside className="w-72 bg-[#1e1f20] border-r border-[#3c4043] flex flex-col shrink-0">
                             <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
-                                <span className="text-[10px] font-bold text-[#9aa0a6] uppercase tracking-widest">Измерения ({points.length})</span>
-                                {image && <button onClick={() => setPoints([])} className="text-[#9aa0a6] hover:text-red-400"><Icon name="trash-2" size={14}/></button>}
+                                <span className="text-[10px] font-bold text-[#c4c7c5] uppercase tracking-widest">Точки ({points.length})</span>
+                                {image && <button onClick={() => setPoints([])} className="text-[#5f6368] hover:text-red-400 transition-colors"><Icon name="trash-2" size={14}/></button>}
                             </div>
-
-                            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                            
+                            <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2">
                                 {!image ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
-                                        <Icon name="image-plus" size={40} className="mb-4" />
-                                        <p className="text-xs">Загрузите план помещения</p>
+                                    <div className="h-full flex flex-col items-center justify-center text-center p-6 opacity-20">
+                                        <Icon name="image" size={40} className="mb-2" />
+                                        <p className="text-xs">Загрузите план этажа</p>
                                     </div>
                                 ) : (
                                     points.map(p => (
-                                        <div key={p.id} onClick={() => setSelectedPointId(p.id)} 
-                                             className={`p-3 rounded-xl border transition-all cursor-pointer ${selectedPointId === p.id ? 'bg-[#2d2f31] border-[#1a73e8]' : 'bg-[#1e1f20] border-[#3c4043] hover:border-[#5f6368]'}`}>
+                                        <div key={p.id} onClick={() => setSelectedId(p.id)} className={`p-3 rounded-xl border transition-all cursor-pointer ${selectedId === p.id ? 'bg-[#28292a] border-[#1a73e8]' : 'bg-transparent border-transparent hover:bg-[#28292a]'}`}>
                                             <div className="flex items-center gap-3">
-                                                <div className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${selectedPointId === p.id ? 'bg-[#1a73e8] text-white' : 'bg-[#3c4043] text-[#9aa0a6]'}`}>{p.id}</div>
+                                                <div className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${selectedId === p.id ? 'bg-[#1a73e8] text-white' : 'bg-[#3c4043] text-[#c4c7c5]'}`}>{p.id}</div>
                                                 <div className="flex-1 relative">
                                                     <input 
-                                                        type="number" value={p.dbm} placeholder="0" className="dbm-input text-sm"
+                                                        type="number" value={p.dbm} placeholder="0" className="w-full bg-transparent border-none outline-none text-[#e3e3e3] text-sm placeholder:text-[#5f6368]"
                                                         onChange={(e) => setPoints(points.map(pt => pt.id === p.id ? {...pt, dbm: e.target.value} : pt))}
                                                     />
-                                                    <span className="absolute right-0 top-0 text-[10px] text-[#5f6368] font-bold">dBm</span>
+                                                    <span className="absolute right-0 top-0.5 text-[9px] text-[#5f6368] font-bold">dBm</span>
                                                 </div>
                                                 <button onClick={(e) => { e.stopPropagation(); setPoints(points.filter(pt => pt.id !== p.id)); }} className="text-[#5f6368] hover:text-red-400"><Icon name="x" size={14}/></button>
                                             </div>
@@ -433,44 +234,46 @@
                                     ))
                                 )}
                             </div>
-                            
+
                             {!image && (
                                 <div className="p-4 bg-[#131314]">
-                                    <label className="block w-full bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-center py-3 rounded-xl text-xs font-bold cursor-pointer transition-all">
-                                        ВЫБРАТЬ ФАЙЛ
-                                        <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
+                                    <label className="block w-full bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-center py-3 rounded-xl text-xs font-bold cursor-pointer transition-all uppercase">
+                                        Выбрать файл
+                                        <input type="file" className="hidden" onChange={onFileChange} accept="image/*" />
                                     </label>
                                 </div>
                             )}
                         </aside>
 
-                        {/* Editor Area */}
-                        <section className="flex-1 relative blueprint-bg flex items-center justify-center overflow-auto custom-scrollbar p-12">
+                        {/* Рабочая область */}
+                        <section className="blueprint-grid p-12 custom-scroll">
                             {image ? (
                                 <>
-                                    {/* Zoom Control */}
-                                    <div className="fixed bottom-8 left-80 z-50 flex gap-1 bg-[#1e1f20]/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#3c4043] shadow-2xl">
-                                        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5]"><Icon name="minus" size={18}/></button>
+                                    {/* Зум */}
+                                    <div className="fixed bottom-8 left-80 z-50 flex bg-[#1e1f20] border border-[#3c4043] p-1.5 rounded-2xl shadow-2xl items-center">
+                                        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-10 h-10 flex items-center justify-center hover:bg-[#3c4043] rounded-xl text-[#c4c7c5]"><Icon name="minus" size={18}/></button>
                                         <button onClick={() => setZoom(1)} className="px-3 text-[10px] font-bold text-[#c4c7c5] hover:text-white uppercase tracking-tighter">100%</button>
-                                        <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5]"><Icon name="plus" size={18}/></button>
+                                        <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-10 h-10 flex items-center justify-center hover:bg-[#3c4043] rounded-xl text-[#c4c7c5]"><Icon name="plus" size={18}/></button>
                                     </div>
 
                                     <div 
                                         ref={mapRef} onClick={addPoint}
-                                        className="relative shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out origin-center"
-                                        style={{ transform: `scale(${zoom})`, backgroundColor: 'white' }}
+                                        className="relative shadow-2xl transition-transform duration-200 ease-out origin-center bg-white"
+                                        style={{ transform: `scale(${zoom})` }}
                                     >
-                                        <img src={image} className="block max-w-none h-auto select-none pointer-events-none" style={{maxHeight: '80vh'}} />
+                                        <img src={image} className="block max-w-none h-auto select-none pointer-events-none" style={{ maxHeight: '80vh' }} draggable={false} />
                                         {points.map(p => (
-                                            <div key={p.id} 
-                                                 className={`map-pin absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto ${selectedPointId === p.id ? 'z-30' : 'z-20'}`}
-                                                 style={{ left: `${p.x}%`, top: `${p.y}%` }}>
-                                                <div className={`w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-[10px] font-bold text-white transition-transform ${selectedPointId === p.id ? 'bg-[#1a73e8] scale-125' : 'bg-red-500 hover:scale-110'}`}>
+                                            <div 
+                                                key={p.id}
+                                                className={`map-pin-unit absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto ${selectedId === p.id ? 'z-30' : 'z-20'}`}
+                                                style={{ left: `${p.x}%`, top: `${p.y}%` }}
+                                            >
+                                                <div className={`w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-[10px] font-bold text-white transition-all ${selectedId === p.id ? 'bg-[#1a73e8] scale-125' : 'bg-red-500 hover:scale-110'}`}>
                                                     {p.id}
                                                 </div>
                                                 {p.dbm && (
-                                                    <div className="mt-1 bg-[#1e1f20] text-white text-[9px] px-2 py-0.5 rounded border border-[#3c4043] font-mono shadow-xl">
-                                                        {p.dbm} dBm
+                                                    <div className="mt-1 bg-[#1e1f20] text-white text-[9px] px-2 py-0.5 rounded border border-[#3c4043] font-bold shadow-xl">
+                                                        {p.dbm}
                                                     </div>
                                                 )}
                                             </div>
@@ -478,9 +281,9 @@
                                     </div>
                                 </>
                             ) : (
-                                <div className="flex flex-col items-center text-[#3c4043]">
-                                    <Icon name="layout" size={100} className="opacity-10 mb-6" />
-                                    <h2 className="text-2xl font-light tracking-tighter uppercase opacity-20">No Project Loaded</h2>
+                                <div className="text-[#3c4043] flex flex-col items-center opacity-10 select-none">
+                                    <Icon name="layers" size={100} className="mb-4" />
+                                    <p className="text-xl font-bold uppercase tracking-widest">Workspace</p>
                                 </div>
                             )}
                         </section>
@@ -493,4 +296,5 @@
         root.render(<App />);
     </script>
 </body>
+</html>
 </html>
