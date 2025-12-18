@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WiFi Mapper Studio</title>
+    <title>WiFi Signal Mapper Pro</title>
     <!-- Подключаем библиотеки -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -11,131 +11,112 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Библиотека для захвата скриншота HTML узла -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
     
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        body { 
-            background-color: #131314; 
-            color: #e3e3e3;
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            overflow: hidden;
-        }
-
-        /* Анимированный фон за картинкой */
-        .animated-bg {
-            background: radial-gradient(circle at 50% 50%, #1e1f20 0%, #131314 100%);
-            position: relative;
-            overflow: hidden;
-        }
-        .animated-bg::before {
-            content: "";
-            position: absolute;
-            width: 200%;
-            height: 200%;
-            background: conic-gradient(from 0deg at 50% 50%, transparent, #1a73e810, transparent);
-            animation: rotate 20s linear infinite;
-        }
-        @keyframes rotate {
-            from { transform: translate(-50%, -50%) rotate(0deg); }
-            to { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-
-        /* Кастомный скроллбар в стиле Chrome/Gemini */
-        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #5f6368; }
-
-        /* Снег */
-        #snow-canvas {
-            position: fixed;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-            z-index: 9999;
-        }
-
-        .glass-panel {
-            background: rgba(30, 31, 32, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        body { overscroll-behavior-y: none; }
+        .map-pin { transition: transform 0.2s; }
+        .map-pin:hover { transform: translate(-50%, -50%) scale(1.1); }
+        /* Стили для скроллбара в боковой панели */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
-<body>
-    <div id="root" class="h-screen w-screen"></div>
+<body class="bg-slate-50 h-screen overflow-hidden select-none">
+    <div id="root" class="h-full"></div>
 
     <script type="text/babel">
         const { useState, useCallback, useRef, useEffect } = React;
 
-        // --- Эффект Снега ---
-        const SnowEffect = ({ active }) => {
-            const canvasRef = useRef(null);
-            useEffect(() => {
-                if (!active) return;
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                let animationId;
-                
-                const particles = Array.from({ length: 150 }, () => ({
-                    x: Math.random() * window.innerWidth,
-                    y: Math.random() * window.innerHeight,
-                    r: Math.random() * 3 + 1,
-                    d: Math.random() * 1,
-                    v: Math.random() * 1 + 0.5
-                }));
-
-                const draw = () => {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.fillStyle = "white";
-                    ctx.beginPath();
-                    particles.forEach(p => {
-                        ctx.moveTo(p.x, p.y);
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                        p.y += p.v;
-                        p.x += Math.sin(p.d) * 0.5;
-                        if (p.y > canvas.height) p.y = -10;
-                    });
-                    ctx.fill();
-                    animationId = requestAnimationFrame(draw);
-                };
-
-                const resize = () => {
-                    canvas.width = window.innerWidth;
-                    canvas.height = window.innerHeight;
-                };
-
-                window.addEventListener('resize', resize);
-                resize();
-                draw();
-                return () => {
-                    cancelAnimationFrame(animationId);
-                    window.removeEventListener('resize', resize);
-                };
-            }, [active]);
-
-            return active ? <canvas ref={canvasRef} id="snow-canvas" /> : null;
-        };
-
+        // --- Компонент иконок Lucide ---
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [name]);
             return <i data-lucide={name} style={{width: size, height: size}} className={`inline-block ${className}`}></i>;
         };
 
-        // --- Основной компонент приложения ---
+        // --- Компонент MapCanvas ---
+        const MapCanvas = ({ imageState, points, onAddPoint, onSelectPoint, selectedPointId, onUpload, mapRef }) => {
+            const containerRef = useRef(null);
+            
+            const handleClick = (e) => {
+                if (!imageState.src || !containerRef.current) return;
+                // Не ставим точку, если кликнули по уже существующей точке
+                if (e.target.closest('.map-pin')) return;
+                
+                const rect = containerRef.current.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 100;
+                const y = ((e.clientY - rect.top) / rect.height) * 100;
+                onAddPoint(x, y);
+            };
+
+            if (!imageState.src) {
+                return (
+                    <div className="flex items-center justify-center h-full w-full p-8">
+                        <div className="max-w-md w-full border-4 border-dashed border-slate-300 rounded-3xl p-12 text-center bg-white/50">
+                            <div className="bg-blue-500 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-200">
+                                <Icon name="image" size={40} className="text-white" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-slate-800 mb-2">План этажа</h3>
+                            <p className="text-slate-500 mb-8">Загрузите изображение помещения, чтобы начать расстановку точек замера</p>
+                            <label className="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer transition-all transform hover:scale-105 active:scale-95 shadow-lg shadow-blue-200">
+                                <Icon name="plus" />
+                                <span>Выбрать файл</span>
+                                <input type="file" accept="image/*" className="hidden" onChange={onUpload} />
+                            </label>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="relative w-full h-full bg-slate-200 flex items-center justify-center p-4 overflow-auto custom-scrollbar">
+                    {/* Этот контейнер mapRef мы будем "фоткать" */}
+                    <div 
+                        ref={(el) => { containerRef.current = el; mapRef.current = el; }} 
+                        className="relative shadow-2xl bg-white" 
+                        onClick={handleClick}
+                    >
+                        <img 
+                            src={imageState.src} 
+                            className="block max-w-none h-auto select-none pointer-events-none" 
+                            style={{ maxHeight: '85vh' }} 
+                            draggable={false} 
+                        />
+                        {points.map((point) => (
+                            <div 
+                                key={point.id} 
+                                onClick={(e) => { e.stopPropagation(); onSelectPoint(point.id); }}
+                                className={`map-pin absolute transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border-2 shadow-lg cursor-pointer transition-all ${
+                                    selectedPointId === point.id 
+                                    ? 'w-10 h-10 bg-blue-600 border-white text-white z-30 scale-110 ring-4 ring-blue-500/30' 
+                                    : 'w-8 h-8 bg-red-500 border-white text-white z-20 hover:bg-red-600'
+                                }`}
+                                style={{ left: `${point.x}%`, top: `${point.y}%` }}
+                            >
+                                <span className="font-bold text-xs">{point.id}</span>
+                                {point.dbm && (
+                                    <div className="absolute top-full mt-2 px-2 py-1 bg-slate-800 text-white text-[10px] font-bold rounded shadow-md whitespace-nowrap pointer-events-none">
+                                        {point.dbm} dBm
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Основное приложение App ---
         const App = () => {
             const [points, setPoints] = useState([]);
             const [selectedPointId, setSelectedPointId] = useState(null);
             const [imageState, setImageState] = useState({ src: '', width: 0, height: 0 });
-            const [zoom, setZoom] = useState(1);
-            const [isSnowing, setIsSnowing] = useState(false);
-            const mapRef = useRef(null);
+            const mapRef = useRef(null); // Реф для экспорта картинки
 
             const handleImageUpload = (event) => {
                 const file = event.target.files?.[0];
@@ -146,7 +127,6 @@
                         img.onload = () => {
                             setImageState({ src: e.target.result, width: img.width, height: img.height });
                             setPoints([]);
-                            setZoom(1);
                         };
                         img.src = e.target.result;
                     };
@@ -154,165 +134,142 @@
                 }
             };
 
-            const handleAddPoint = (e) => {
-                if (!imageState.src || e.target.closest('.map-pin')) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 100;
-                const y = ((e.clientY - rect.top) / rect.height) * 100;
-                
+            const handleAddPoint = useCallback((x, y) => {
                 const newId = points.length > 0 ? Math.max(...points.map(p => p.id)) + 1 : 1;
                 const newPoint = { id: newId, x, y, dbm: '' };
                 setPoints([...points, newPoint]);
                 setSelectedPointId(newId);
-            };
+            }, [points]);
 
             const handleExport = async () => {
-                if (points.length === 0) return alert("Нет данных для экспорта");
-                
-                // Excel
-                const data = points.map(p => ({ "Point №": p.id, "dBm": p.dbm || "0" }));
+                if (points.length === 0) return alert("Добавьте точки для экспорта!");
+
+                // 1. Экспорт в Excel
+                const data = points.map(p => ({ "№ Точки": p.id, "Уровень сигнала (dBm)": p.dbm || "н/д" }));
                 const ws = XLSX.utils.json_to_sheet(data);
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "WiFi Data");
-                XLSX.writeFile(wb, "wifi_report.xlsx");
+                XLSX.utils.book_append_sheet(wb, ws, "WiFi Measurements");
+                XLSX.writeFile(wb, "wifi-survey-data.xlsx");
 
-                // PNG
+                // 2. Экспорт в PNG (Карта с точками)
                 if (mapRef.current) {
-                    const dataUrl = await htmlToImage.toPng(mapRef.current);
-                    const link = document.createElement('a');
-                    link.download = 'wifi_map.png';
-                    link.href = dataUrl;
-                    link.click();
+                    try {
+                        const dataUrl = await htmlToImage.toPng(mapRef.current, { backgroundColor: '#ffffff' });
+                        const link = document.createElement('a');
+                        link.download = 'wifi-signal-map.png';
+                        link.href = dataUrl;
+                        link.click();
+                    } catch (err) {
+                        console.error('Ошибка при создании изображения:', err);
+                    }
                 }
             };
 
-            return (
-                <div className="flex flex-col h-full bg-[#131314] overflow-hidden">
-                    <SnowEffect active={isSnowing} />
-                    
-                    {/* Header */}
-                    <header className="h-14 flex items-center justify-between px-4 border-b border-[#3c4043] bg-[#1e1f20] shrink-0 z-50">
-                        <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-[#1a73e8] rounded-lg flex items-center justify-center shadow-lg">
-                                <Icon name="zap" size={18} className="text-white fill-current" />
-                            </div>
-                            <span className="font-medium text-[#e3e3e3] text-sm tracking-tight">WiFi Signal Mapper</span>
-                        </div>
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [imageState.src, points]);
 
-                        <div className="flex items-center gap-2">
-                            <button 
-                                onClick={() => setIsSnowing(!isSnowing)}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isSnowing ? 'bg-white text-black' : 'hover:bg-[#3c4043] text-[#c4c7c5]'}`}
-                            >
-                                <Icon name="snowflake" size={14} />
-                                <span>Let it snow</span>
-                            </button>
-                            
-                            {imageState.src && (
-                                <button onClick={handleExport} className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-4 py-1.5 rounded-full text-xs font-medium transition-all shadow-md flex items-center gap-2">
-                                    <Icon name="download" size={14} />
-                                    Экспорт
-                                </button>
-                            )}
+            return (
+                <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900">
+                    {/* Шапка */}
+                    <header className="bg-white border-b h-16 flex items-center justify-between px-6 shrink-0 z-50 shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                                <Icon name="wifi" />
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-extrabold leading-none">WiFi Mapper</h1>
+                                <p className="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Signal Survey Tool</p>
+                            </div>
                         </div>
+                        
+                        {imageState.src && (
+                            <div className="flex gap-2">
+                                <button onClick={handleExport} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-md active:scale-95 font-medium">
+                                    <Icon name="download" size={18} />
+                                    <span>Экспорт (Excel + PNG)</span>
+                                </button>
+                                <button onClick={() => { if(confirm('Очистить проект?')) {setImageState({src:''}); setPoints([]);} }} className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-500 text-slate-500 p-2.5 rounded-xl transition-all">
+                                    <Icon name="trash-2" size={18} />
+                                </button>
+                            </div>
+                        )}
                     </header>
 
                     <main className="flex-1 flex overflow-hidden">
-                        {/* Sidebar */}
-                        <aside className="w-[300px] border-r border-[#3c4043] bg-[#1e1f20] flex flex-col shrink-0">
-                            <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
-                                <span className="text-xs font-semibold text-[#c4c7c5] uppercase tracking-wider">Точки ({points.length})</span>
-                                {imageState.src && (
-                                    <button onClick={() => setPoints([])} className="text-[#c4c7c5] hover:text-white transition-colors">
-                                        <Icon name="trash-2" size={16} />
-                                    </button>
-                                )}
-                            </div>
-                            
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-2">
-                                {!imageState.src ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4">
-                                        <div className="w-12 h-12 rounded-full bg-[#3c4043] flex items-center justify-center">
-                                            <Icon name="upload-cloud" size={24} className="text-[#c4c7c5]" />
-                                        </div>
-                                        <p className="text-sm text-[#c4c7c5]">Загрузите план этажа,<br/>чтобы начать работу</p>
-                                        <label className="bg-[#1a73e8] text-white px-4 py-2 rounded-lg text-xs font-medium cursor-pointer hover:bg-[#1b66c9]">
-                                            Выбрать файл
-                                            <input type="file" className="hidden" onChange={handleImageUpload} accept="image/*" />
-                                        </label>
-                                    </div>
-                                ) : (
-                                    points.map(p => (
-                                        <div 
-                                            key={p.id}
-                                            onClick={() => setSelectedPointId(p.id)}
-                                            className={`p-3 rounded-xl transition-all cursor-pointer border ${selectedPointId === p.id ? 'bg-[#28292a] border-[#1a73e8]' : 'bg-[#1e1f20] border-transparent hover:bg-[#28292a]'}`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold ${selectedPointId === p.id ? 'bg-[#1a73e8] text-white' : 'bg-[#3c4043] text-[#c4c7c5]'}`}>
-                                                    {p.id}
-                                                </div>
-                                                <div className="flex-1 relative">
-                                                    <input 
-                                                        type="number"
-                                                        value={p.dbm}
-                                                        placeholder="0"
-                                                        className="w-full bg-transparent border-none outline-none text-[#e3e3e3] font-mono text-base placeholder:text-[#5f6368]"
-                                                        onChange={(e) => setPoints(points.map(pt => pt.id === p.id ? {...pt, dbm: e.target.value} : pt))}
-                                                    />
-                                                    <span className="absolute right-0 top-1 text-[10px] text-[#5f6368] font-bold">dBm</span>
-                                                </div>
-                                                <button onClick={(e) => { e.stopPropagation(); setPoints(points.filter(pt => pt.id !== p.id)); }} className="text-[#5f6368] hover:text-red-400">
-                                                    <Icon name="x" size={14} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </aside>
-
-                        {/* Map Area */}
-                        <section className="flex-1 relative animated-bg flex items-center justify-center overflow-auto p-10 custom-scrollbar">
-                            {imageState.src ? (
-                                <>
-                                    {/* Zoom Controls */}
-                                    <div className="fixed bottom-6 right-[320px] z-50 flex flex-col gap-2 glass-panel p-2 rounded-2xl">
-                                        <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-10 h-10 flex items-center justify-center hover:bg-[#3c4043] rounded-xl text-[#c4c7c5]"><Icon name="zoom-in" size={20}/></button>
-                                        <button onClick={() => setZoom(1)} className="w-10 h-10 flex items-center justify-center hover:bg-[#3c4043] rounded-xl text-[#c4c7c5] text-[10px] font-bold underline">1:1</button>
-                                        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.5))} className="w-10 h-10 flex items-center justify-center hover:bg-[#3c4043] rounded-xl text-[#c4c7c5]"><Icon name="zoom-out" size={20}/></button>
-                                    </div>
-
-                                    <div 
-                                        ref={mapRef}
-                                        onClick={handleAddPoint}
-                                        className="relative shadow-2xl transition-transform duration-200 ease-out origin-center cursor-crosshair"
-                                        style={{ transform: `scale(${zoom})`, backgroundColor: 'white' }}
-                                    >
-                                        <img src={imageState.src} className="block max-w-none h-auto select-none" style={{ maxHeight: '80vh' }} draggable={false} />
-                                        {points.map(p => (
-                                            <div 
-                                                key={p.id}
-                                                className={`map-pin absolute -translate-x-1/2 -translate-y-1/2 flex items-center justify-center rounded-full border-2 transition-all shadow-xl ${selectedPointId === p.id ? 'w-9 h-9 bg-[#1a73e8] border-white z-20 scale-110' : 'w-7 h-7 bg-red-500 border-white z-10'}`}
-                                                style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                                            >
-                                                <span className="text-[10px] font-bold text-white">{p.id}</span>
-                                                {p.dbm && (
-                                                    <div className="absolute top-full mt-1 px-2 py-0.5 bg-[#1e1f20] text-white text-[9px] rounded-md font-bold whitespace-nowrap shadow-md border border-[#3c4043]">
-                                                        {p.dbm} dBm
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="text-[#3c4043] flex flex-col items-center">
-                                    <Icon name="layers" size={80} className="opacity-20 mb-4" />
-                                    <p className="text-xl font-medium">Workspace</p>
-                                </div>
-                            )}
+                        {/* Основная область карты */}
+                        <section className="flex-1 relative bg-slate-100 overflow-hidden">
+                            <MapCanvas 
+                                imageState={imageState} 
+                                points={points} 
+                                onAddPoint={handleAddPoint} 
+                                onSelectPoint={setSelectedPointId} 
+                                selectedPointId={selectedPointId} 
+                                onUpload={handleImageUpload}
+                                mapRef={mapRef}
+                            />
                         </section>
+
+                        {/* Боковая панель */}
+                        {imageState.src && (
+                            <aside className="w-80 bg-white border-l flex flex-col shadow-2xl z-40">
+                                <div className="p-4 border-b bg-slate-50/50">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="font-bold text-slate-700">Список измерений</h3>
+                                        <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-bold">{points.length}</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                    {points.length === 0 ? (
+                                        <div className="text-center py-10 text-slate-400">
+                                            <Icon name="mouse-pointer-2" size={32} className="mx-auto mb-2 opacity-20" />
+                                            <p className="text-sm">Нажмите на карту,<br/>чтобы поставить точку</p>
+                                        </div>
+                                    ) : (
+                                        points.slice().reverse().map(p => (
+                                            <div 
+                                                key={p.id} 
+                                                onClick={() => setSelectedPointId(p.id)} 
+                                                className={`p-3 rounded-xl border-2 transition-all cursor-pointer ${
+                                                    selectedPointId === p.id 
+                                                    ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                                                    : 'border-slate-100 bg-white hover:border-slate-200'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shrink-0 ${
+                                                        selectedPointId === p.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                                                    }`}>
+                                                        {p.id}
+                                                    </div>
+                                                    <div className="flex-1 relative">
+                                                        <input 
+                                                            type="number" 
+                                                            value={p.dbm} 
+                                                            placeholder="-65" 
+                                                            className="w-full bg-transparent border-b-2 border-slate-200 focus:border-blue-400 outline-none font-mono font-bold text-lg pr-8" 
+                                                            onChange={(e) => setPoints(points.map(pt => pt.id === p.id ? {...pt, dbm: e.target.value} : pt))} 
+                                                        />
+                                                        <span className="absolute right-0 bottom-1 text-[10px] text-slate-400 font-bold">dBm</span>
+                                                    </div>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setPoints(points.filter(pt => pt.id !== p.id)); }} 
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                                                    >
+                                                        <Icon name="x" size={18} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                <div className="p-4 border-t bg-slate-50 text-[11px] text-slate-400 text-center leading-tight">
+                                    Кликните по плану, чтобы добавить маркер.<br/>Данные сохраняются только в рамках сессии.
+                                </div>
+                            </aside>
+                        )}
                     </main>
                 </div>
             );
@@ -322,4 +279,5 @@
         root.render(<App />);
     </script>
 </body>
+</html>
 </html>
