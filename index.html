@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFi Mapper Studio</title>
-    <!-- Библиотеки -->
+    <!-- Подключаем библиотеки -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,47 +16,34 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap');
         
-        :root {
-            --bg-color: #131314;
-            --panel-color: #1e1f20;
-            --accent-color: #1a73e8;
-            --border-color: #3c4043;
-        }
-
         body { 
-            background-color: var(--bg-color); 
+            background-color: #131314; 
             color: #e3e3e3;
             font-family: 'Inter', sans-serif;
             margin: 0;
             overflow: hidden;
         }
 
-        /* Новый технологичный фон: Сетка + Радарный засвет */
-        .blueprint-bg {
-            background-color: var(--bg-color);
+        /* Аккуратная сетка на заднем фоне */
+        .blueprint-grid {
+            background-color: #131314;
             background-image: 
-                linear-gradient(var(--border-color) 1px, transparent 1px),
-                linear-gradient(90deg, var(--border-color) 1px, transparent 1px);
+                linear-gradient(#242426 1px, transparent 1px),
+                linear-gradient(90deg, #242426 1px, transparent 1px);
             background-size: 40px 40px;
             background-position: center center;
             position: relative;
         }
-        
-        .blueprint-bg::after {
+
+        /* Мягкое свечение в центре, не мешающее работе */
+        .blueprint-grid::after {
             content: "";
             position: absolute;
             inset: 0;
-            background: radial-gradient(circle at 50% 50%, rgba(26, 115, 232, 0.1), transparent 70%);
+            background: radial-gradient(circle at center, rgba(26, 115, 232, 0.08), transparent 75%);
             pointer-events: none;
-            animation: pulse 8s infinite alternate;
         }
 
-        @keyframes pulse {
-            from { opacity: 0.4; transform: scale(1); }
-            to { opacity: 0.8; transform: scale(1.2); }
-        }
-
-        /* Снег */
         #snow-canvas {
             position: fixed;
             top: 0; left: 0;
@@ -64,39 +51,23 @@
             z-index: 100;
         }
 
-        /* Кастомный ввод */
-        .dbm-input {
-            background: transparent;
-            border: none;
-            outline: none;
-            color: #e3e3e3;
-            font-family: 'JetBrains Mono', monospace;
-            width: 100%;
-        }
-
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #444746; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useCallback, useRef, useEffect, useMemo } = React;
+        const { useState, useCallback, useRef, useEffect } = React;
 
-        // Безопасный компонент иконки
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const iconRef = useRef(null);
-            useEffect(() => {
-                if (window.lucide && iconRef.current) {
-                    window.lucide.createIcons({
-                        attrs: { class: className, strokeWidth: 2, width: size, height: size },
-                        nameAttr: 'data-lucide'
-                    });
-                }
-            }, [name, className, size]);
-            return <i ref={iconRef} data-lucide={name}></i>;
+        // Безопасный компонент иконок
+        const Icon = ({ name, size = 18, className = "" }) => {
+            return <i data-lucide={name} style={{width: size, height: size}} className={`inline-block ${className}`}></i>;
         };
 
         const SnowEffect = ({ active }) => {
@@ -106,15 +77,15 @@
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 let animationId;
-                const particles = Array.from({ length: 100 }, () => ({
+                const particles = Array.from({ length: 120 }, () => ({
                     x: Math.random() * window.innerWidth,
                     y: Math.random() * window.innerHeight,
                     r: Math.random() * 2 + 1,
-                    v: Math.random() * 1 + 0.5
+                    v: Math.random() * 0.8 + 0.4
                 }));
                 const draw = () => {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
                     particles.forEach(p => {
                         ctx.beginPath();
                         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
@@ -124,9 +95,227 @@
                     });
                     animationId = requestAnimationFrame(draw);
                 };
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
+                const handleResize = () => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                };
+                window.addEventListener('resize', handleResize);
+                handleResize();
                 draw();
+                return () => {
+                    cancelAnimationFrame(animationId);
+                    window.removeEventListener('resize', handleResize);
+                };
+            }, [active]);
+            return active ? <canvas ref={canvasRef} id="snow-canvas" /> : null;
+        };
+
+        const App = () => {
+            const [points, setPoints] = useState([]);
+            const [selectedPointId, setSelectedPointId] = useState(null);
+            const [image, setImage] = useState(null);
+            const [zoom, setZoom] = useState(1);
+            const [isSnowing, setIsSnowing] = useState(false);
+            const mapRef = useRef(null);
+
+            // Инициализация иконок Lucide после обновлений
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [image, points, isSnowing]);
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    setImage(ev.target.result);
+                    setPoints([]);
+                    setZoom(1);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const addPoint = (e) => {
+                if (!image || e.target.closest('.map-pin')) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 100;
+                const y = ((e.clientY - rect.top) / rect.height) * 100;
+                
+                const newId = points.length > 0 ? Math.max(...points.map(p => p.id)) + 1 : 1;
+                const newPoint = { id: newId, x, y, dbm: '' };
+                setPoints([...points, newPoint]);
+                setSelectedPointId(newId);
+            };
+
+            const handleExport = async () => {
+                if (points.length === 0) return alert("Сначала добавьте точки замера!");
+                
+                // 1. Сохранение Excel
+                const data = points.map(p => ({ "Точка №": p.id, "Сигнал (dBm)": p.dbm || "0" }));
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "WiFi Report");
+                XLSX.writeFile(wb, "wifi_data.xlsx");
+
+                // 2. Сохранение Картинки
+                if (mapRef.current) {
+                    try {
+                        const dataUrl = await htmlToImage.toPng(mapRef.current, { backgroundColor: '#ffffff' });
+                        const link = document.createElement('a');
+                        link.download = 'wifi_plan_export.png';
+                        link.href = dataUrl;
+                        link.click();
+                    } catch (err) {
+                        console.error('Ошибка экспорта изображения:', err);
+                    }
+                }
+            };
+
+            return (
+                <div className="flex flex-col h-screen w-screen bg-[#131314]">
+                    <SnowEffect active={isSnowing} />
+                    
+                    {/* Header */}
+                    <header className="h-14 bg-[#1e1f20] border-b border-[#3c4043] flex items-center justify-between px-6 shrink-0 z-50 shadow-md">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-[#1a73e8] rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                                <Icon name="wifi" size={18} />
+                            </div>
+                            <span className="text-sm font-semibold tracking-tight text-[#e3e3e3]">WIFI MAPPER STUDIO</span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <button 
+                                onClick={() => setIsSnowing(!isSnowing)}
+                                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${isSnowing ? 'bg-white text-black font-bold' : 'bg-[#3c4043] text-[#c4c7c5] hover:bg-[#4f5255]'}`}
+                            >
+                                <Icon name="snowflake" size={14} />
+                                <span>Let it snow</span>
+                            </button>
+                            {image && (
+                                <button onClick={handleExport} className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-5 py-1.5 rounded-full text-xs font-medium shadow-md transition-all active:scale-95">
+                                    Экспорт
+                                </button>
+                            )}
+                        </div>
+                    </header>
+
+                    <main className="flex-1 flex overflow-hidden">
+                        {/* Sidebar */}
+                        <aside className="w-72 bg-[#1e1f20] border-r border-[#3c4043] flex flex-col shrink-0 z-40">
+                            <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-[#9aa0a6] uppercase tracking-widest">Измерения ({points.length})</span>
+                                {image && (
+                                    <button onClick={() => { if(confirm('Удалить все точки?')) setPoints([]) }} className="text-[#5f6368] hover:text-red-400 transition-colors">
+                                        <Icon name="trash-2" size={16} />
+                                    </button>
+                                )}
+                            </div>
+                            
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                                {!image ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-center opacity-20 py-10">
+                                        <Icon name="layout" size={48} className="mb-4" />
+                                        <p className="text-xs">Загрузите план,<br/>чтобы начать работу</p>
+                                    </div>
+                                ) : (
+                                    points.slice().reverse().map(p => (
+                                        <div 
+                                            key={p.id}
+                                            onClick={() => setSelectedPointId(p.id)}
+                                            className={`p-3 rounded-xl transition-all border cursor-pointer ${selectedPointId === p.id ? 'bg-[#2d2f31] border-[#1a73e8] shadow-lg' : 'bg-[#1e1f20] border-transparent hover:border-[#3c4043]'}`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${selectedPointId === p.id ? 'bg-[#1a73e8] text-white' : 'bg-[#3c4043] text-[#9aa0a6]'}`}>
+                                                    {p.id}
+                                                </div>
+                                                <div className="flex-1 relative">
+                                                    <input 
+                                                        type="number"
+                                                        value={p.dbm}
+                                                        placeholder="0"
+                                                        className="w-full bg-transparent border-none outline-none text-[#e3e3e3] font-mono text-sm placeholder:text-[#444746]"
+                                                        onChange={(e) => setPoints(points.map(pt => pt.id === p.id ? {...pt, dbm: e.target.value} : pt))}
+                                                    />
+                                                    <span className="absolute right-0 top-0.5 text-[9px] text-[#5f6368] font-bold uppercase">dBm</span>
+                                                </div>
+                                                <button onClick={(e) => { e.stopPropagation(); setPoints(points.filter(pt => pt.id !== p.id)); }} className="text-[#5f6368] hover:text-red-400">
+                                                    <Icon name="x" size={14} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            {!image && (
+                                <div className="p-4 bg-[#131314]">
+                                    <label className="block w-full bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-center py-3.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-lg active:scale-95 uppercase tracking-wide">
+                                        Загрузить план
+                                        <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
+                                    </label>
+                                </div>
+                            )}
+                        </aside>
+
+                        {/* Map Area */}
+                        <section className="flex-1 relative blueprint-grid flex items-center justify-center overflow-auto custom-scrollbar p-12">
+                            {image ? (
+                                <>
+                                    {/* Zoom Control Panel */}
+                                    <div className="fixed bottom-8 left-[320px] z-50 flex items-center bg-[#1e1f20]/90 backdrop-blur-md border border-[#3c4043] p-1.5 rounded-2xl shadow-2xl">
+                                        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5] transition-colors"><Icon name="minus" size={18}/></button>
+                                        <div className="w-px h-4 bg-[#3c4043] mx-1"></div>
+                                        <button onClick={() => setZoom(1)} className="px-3 text-[10px] font-bold text-[#9aa0a6] hover:text-white uppercase tracking-tighter transition-colors">100%</button>
+                                        <div className="w-px h-4 bg-[#3c4043] mx-1"></div>
+                                        <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-[#3c4043] text-[#c4c7c5] transition-colors"><Icon name="plus" size={18}/></button>
+                                    </div>
+
+                                    {/* The Map */}
+                                    <div 
+                                        ref={mapRef}
+                                        onClick={addPoint}
+                                        className="relative shadow-[0_0_60px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out origin-center bg-white cursor-crosshair"
+                                        style={{ transform: `scale(${zoom})` }}
+                                    >
+                                        <img src={image} className="block max-w-none h-auto select-none pointer-events-none" style={{ maxHeight: '80vh' }} draggable={false} />
+                                        {points.map(p => (
+                                            <div 
+                                                key={p.id}
+                                                className={`map-pin absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto ${selectedPointId === p.id ? 'z-30' : 'z-20'}`}
+                                                style={{ left: `${p.x}%`, top: `${p.y}%` }}
+                                            >
+                                                <div className={`w-8 h-8 rounded-full border-2 border-white shadow-xl flex items-center justify-center text-[10px] font-bold text-white transition-all ${selectedPointId === p.id ? 'bg-[#1a73e8] scale-125' : 'bg-red-500 hover:scale-110'}`}>
+                                                    {p.id}
+                                                </div>
+                                                {p.dbm && (
+                                                    <div className="mt-1 bg-[#1e1f20] text-white text-[9px] px-2 py-0.5 rounded border border-[#3c4043] font-bold shadow-lg whitespace-nowrap">
+                                                        {p.dbm} dBm
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="text-[#3c4043] flex flex-col items-center select-none">
+                                    <Icon name="layers" size={100} className="opacity-5 mb-6" />
+                                    <h2 className="text-2xl font-light tracking-[0.2em] opacity-10 uppercase">Studio Canvas</h2>
+                                </div>
+                            )}
+                        </section>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>draw();
                 return () => cancelAnimationFrame(animationId);
             }, [active]);
             return active ? <canvas ref={canvasRef} id="snow-canvas" /> : null;
